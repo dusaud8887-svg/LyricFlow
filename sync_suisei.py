@@ -1,5 +1,5 @@
 """
-호시마치 스이세이 가사 싱크 스크립트
+호시마치 스이세이 가사 싱크 스크립트 (v1.2 Enhanced)
 MP3 + 일본어 가사 → LRC 자막 생성
 
 사용법:
@@ -15,6 +15,7 @@ MP3 + 일본어 가사 → LRC 자막 생성
 import sys
 from pathlib import Path
 import time
+from typing import Optional
 
 # 라이브러리 import 에러 처리
 try:
@@ -31,19 +32,46 @@ except ImportError:
     print("   설치: pip install stable-ts")
     sys.exit(1)
 
-# 상수 정의
+# tqdm (선택적)
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+
+# ============================================================
+# 설정 (사용자 수정 가능)
+# ============================================================
+
 SONGS_DIR = 'songs'
 LYRICS_DIR = 'lyrics'
 OUTPUT_DIR = 'output'
+
+# 모델 선택 (속도 vs 품질)
+# 'large-v3': 최고 품질 (±0.2초), 느림
+# 'large-v3-turbo': 6배 빠름, large-v2급 품질 (±0.3초)
 MODEL_NAME = 'large-v3'
+
 LANGUAGE = 'ja'
 
+# Enhanced LRC 옵션 (단어별 타임스탬프 - 카라오케용)
+# False: 일반 LRC (라인별)
+# True: Enhanced LRC (단어별 - 더 정밀)
+WORD_LEVEL_LRC = False
+
+# 요약 로그 저장 여부
+SAVE_SUMMARY_LOG = True
+SUMMARY_LOG_FILE = 'summary.txt'
+
+# ============================================================
+# 함수 정의
+# ============================================================
 
 def verify_environment() -> bool:
     """환경 검증: GPU, CUDA, 폴더 존재 확인"""
 
     print("=" * 60)
-    print("🎵 호시마치 스이세이 가사 싱크 시작")
+    print("🎵 호시마치 스이세이 가사 싱크 시작 (v1.2)")
     print("=" * 60)
     print()
 
@@ -69,7 +97,14 @@ def verify_environment() -> bool:
 
     print()
 
-    # [4] 폴더 확인
+    # [4] 설정 출력
+    print(f"📊 설정:")
+    print(f"   모델: {MODEL_NAME}")
+    print(f"   Enhanced LRC: {'활성화 (단어별)' if WORD_LEVEL_LRC else '비활성화 (라인별)'}")
+    print(f"   로그 저장: {'활성화' if SAVE_SUMMARY_LOG else '비활성화'}")
+    print()
+
+    # [5] 폴더 확인
     songs_path = Path(SONGS_DIR)
     lyrics_path = Path(LYRICS_DIR)
     output_path = Path(OUTPUT_DIR)
@@ -186,20 +221,23 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
         elapsed = time.time() - start
 
         # [3] LRC 저장
-        result.to_srt_vtt(str(output_path), word_level=False)
+        result.to_srt_vtt(str(output_path), word_level=WORD_LEVEL_LRC)
 
         # [4] 결과 출력
         file_size = output_path.stat().st_size / 1024  # KB
+        lrc_type = "Enhanced (단어별)" if WORD_LEVEL_LRC else "일반 (라인별)"
         print(f"✅ 완료: {output_path}")
-        print(f"⏱️ 소요시간: {elapsed:.1f}초")
-        print(f"📊 LRC 크기: {file_size:.1f} KB")
+        print(f"   타입: {lrc_type}")
+        print(f"   소요시간: {elapsed:.1f}초")
+        print(f"   크기: {file_size:.1f} KB")
         print()
 
         return {
             'success': True,
             'time': elapsed,
             'lines': lines,
-            'size': file_size
+            'size': file_size,
+            'lrc_type': lrc_type
         }
 
     except UnicodeDecodeError as e:
@@ -223,47 +261,78 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
         return {'success': False, 'error': f'{type(e).__name__}'}
 
 
-def print_summary(results: list[dict], total_time: float) -> None:
-    """처리 결과 요약 출력"""
+def print_summary(results: list[dict], total_time: float, save_to_file: bool = False) -> None:
+    """처리 결과 요약 출력 (및 파일 저장)"""
 
-    print("=" * 60)
+    # 요약 텍스트 생성
+    summary_lines = []
+    summary_lines.append("=" * 60)
 
     # 성공/실패 집계
     success_count = sum(1 for r in results if r.get('success', False))
     fail_count = len(results) - success_count
 
     if fail_count == 0:
-        print("✅ 전체 처리 완료!")
+        summary_lines.append("✅ 전체 처리 완료!")
     else:
-        print("⚠️ 일부 오류 발생")
+        summary_lines.append("⚠️ 일부 오류 발생")
 
-    print("=" * 60)
-    print(f"총 곡 수: {len(results)}곡")
-    print(f"성공: {success_count}곡")
-    print(f"실패: {fail_count}곡")
+    summary_lines.append("=" * 60)
+    summary_lines.append(f"총 곡 수: {len(results)}곡")
+    summary_lines.append(f"성공: {success_count}곡")
+    summary_lines.append(f"실패: {fail_count}곡")
+    summary_lines.append(f"모델: {MODEL_NAME}")
+    summary_lines.append(f"LRC 타입: {'Enhanced (단어별)' if WORD_LEVEL_LRC else '일반 (라인별)'}")
 
     # 실패한 곡 목록
     if fail_count > 0:
-        print()
-        print("실패한 곡:")
+        summary_lines.append("")
+        summary_lines.append("실패한 곡:")
         for r in results:
             if not r.get('success', False):
                 song_name = r.get('name', '알 수 없음')
                 error = r.get('error', '알 수 없는 오류')
-                print(f"  - {song_name}: {error}")
+                summary_lines.append(f"  - {song_name}: {error}")
 
     # 소요 시간
-    print()
-    print(f"총 소요시간: {total_time:.1f}초 ({total_time/60:.1f}분)")
+    summary_lines.append("")
+    summary_lines.append(f"총 소요시간: {total_time:.1f}초 ({total_time/60:.1f}분)")
 
     # 평균 처리 시간 (안전하게 계산)
     if success_count > 0:
         successful_times = [r.get('time', 0) for r in results if r.get('success', False) and 'time' in r]
         if successful_times:
             avg_time = sum(successful_times) / len(successful_times)
-            print(f"평균 처리 시간: {avg_time:.1f}초/곡")
+            summary_lines.append(f"평균 처리 시간: {avg_time:.1f}초/곡")
 
-    print("=" * 60)
+    # 성공한 곡 상세 (옵션)
+    if success_count > 0:
+        summary_lines.append("")
+        summary_lines.append("성공한 곡:")
+        for r in results:
+            if r.get('success', False):
+                song_name = r.get('name', '알 수 없음')
+                elapsed = r.get('time', 0)
+                lines_count = r.get('lines', 0)
+                summary_lines.append(f"  ✓ {song_name}: {lines_count}줄, {elapsed:.1f}초")
+
+    summary_lines.append("=" * 60)
+
+    # 출력
+    summary_text = '\n'.join(summary_lines)
+    print(summary_text)
+
+    # 파일 저장 (선택적)
+    if save_to_file:
+        try:
+            with open(SUMMARY_LOG_FILE, 'w', encoding='utf-8') as f:
+                f.write(f"호시마치 스이세이 가사 싱크 결과 요약\n")
+                f.write(f"생성 시각: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("\n")
+                f.write(summary_text)
+            print(f"\n📄 요약 로그 저장: {SUMMARY_LOG_FILE}")
+        except Exception as e:
+            print(f"\n⚠️ 요약 로그 저장 실패: {e}")
 
 
 def main() -> None:
@@ -284,8 +353,9 @@ def main() -> None:
             sys.exit(1)
 
         # [3] 모델 로드
-        print("🔄 large-v3 모델 로딩 중...")
-        print("   (첫 실행시 2.9GB 다운로드됩니다)")
+        print("🔄 모델 로딩 중...")
+        print(f"   모델: {MODEL_NAME}")
+        print("   (첫 실행시 자동 다운로드됩니다)")
         print()
 
         try:
@@ -311,9 +381,18 @@ def main() -> None:
         total_start = time.time()
         results = []
 
-        for i, song in enumerate(songs, 1):
-            print(f"[{i}/{len(songs)}] 처리 중: {song['name']}")
-            print("-" * 60)
+        # tqdm 사용 가능하면 진행률 바 표시
+        if TQDM_AVAILABLE:
+            song_iter = tqdm(songs, desc="전체 진행", unit="곡")
+        else:
+            song_iter = songs
+
+        for i, song in enumerate(song_iter, 1):
+            if not TQDM_AVAILABLE:
+                print(f"[{i}/{len(songs)}] 처리 중: {song['name']}")
+                print("-" * 60)
+            else:
+                song_iter.set_description(f"처리 중: {song['name']}")
 
             result = process_song(
                 model,
@@ -329,7 +408,8 @@ def main() -> None:
         total_time = time.time() - total_start
 
         # [5] 요약 출력
-        print_summary(results, total_time)
+        print()  # 줄바꿈
+        print_summary(results, total_time, save_to_file=SAVE_SUMMARY_LOG)
 
         # [6] GPU 메모리 정리
         del model
@@ -339,7 +419,7 @@ def main() -> None:
         print("\n\n⚠️ 사용자가 중단했습니다.")
         if 'results' in locals() and results:
             total_time = time.time() - total_start
-            print_summary(results, total_time)
+            print_summary(results, total_time, save_to_file=SAVE_SUMMARY_LOG)
         sys.exit(0)
 
 

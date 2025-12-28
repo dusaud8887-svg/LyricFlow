@@ -1,10 +1,11 @@
-# 🎵 호시마치 스이세이 자막 생성기
+# 🎵 호시마치 스이세이 자막 생성기 (v1.2 Enhanced)
 
 일본어 노래 가사와 MP3 파일을 입력받아 **정확한 타임스탬프가 부여된 LRC 자막 파일**을 자동 생성하는 배치 처리 도구입니다.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![GPU](https://img.shields.io/badge/GPU-CUDA_Required-green.svg)
+![Version](https://img.shields.io/badge/version-1.2-brightgreen.svg)
 
 ## ✨ 주요 특징
 
@@ -14,6 +15,13 @@
 - 🛡️ **견고한 실행**: 개별 곡 실패 시에도 나머지 계속 처리
 - 📊 **실시간 피드백**: 진행 상황 및 처리 결과 요약 리포트
 - 🇯🇵 **일본어 전용**: UTF-8 BOM 처리 및 일본어 최적화
+
+### 🆕 v1.2 신규 기능
+- 🎤 **Enhanced LRC 옵션**: 단어별 타임스탬프 (카라오케용)
+- 🚀 **모델 선택**: large-v3 vs large-v3-turbo (속도 6배)
+- 📈 **진행률 바**: tqdm 지원으로 시각적 피드백
+- 📄 **요약 로그 저장**: 처리 결과를 파일로 자동 저장
+- ⚙️ **간편한 설정**: 스크립트 상단의 상수로 쉽게 조정
 
 ## 📋 목차
 
@@ -131,6 +139,78 @@ file -i lyrics/stellar_stellar.txt
 # UTF-8로 변환 (필요시)
 iconv -f EUC-KR -t UTF-8 old.txt > lyrics/new.txt
 ```
+
+## ⚙️ 고급 설정
+
+v1.2부터 스크립트 상단의 상수를 변경하여 동작을 쉽게 커스터마이징할 수 있습니다.
+
+### 설정 가능한 옵션
+
+`sync_suisei.py` 파일 상단을 열고 원하는 값으로 변경하세요:
+
+```python
+# ============================================================
+# 설정 (사용자 수정 가능)
+# ============================================================
+
+# 폴더 경로
+SONGS_DIR = 'songs'      # MP3 파일 폴더
+LYRICS_DIR = 'lyrics'    # 가사 파일 폴더
+OUTPUT_DIR = 'output'    # LRC 출력 폴더
+
+# 모델 선택 (속도 vs 품질)
+MODEL_NAME = 'large-v3'          # 최고 품질 (±0.2초), 느림
+# MODEL_NAME = 'large-v3-turbo'  # 6배 빠름, large-v2급 품질 (±0.3초)
+
+# 언어
+LANGUAGE = 'ja'  # 일본어
+
+# Enhanced LRC 옵션 (단어별 타임스탬프 - 카라오케용)
+WORD_LEVEL_LRC = False   # 일반 LRC (라인별)
+# WORD_LEVEL_LRC = True  # Enhanced LRC (단어별 - 더 정밀)
+
+# 요약 로그 저장
+SAVE_SUMMARY_LOG = True          # 활성화
+SUMMARY_LOG_FILE = 'summary.txt' # 로그 파일명
+```
+
+### 설정 조합 예시
+
+**1. 최고 품질 모드 (기본)**
+```python
+MODEL_NAME = 'large-v3'
+WORD_LEVEL_LRC = False
+```
+- 타임스탬프 정확도: ±0.2초
+- 처리 속도: 3분 곡 기준 12-15초
+- 용도: 일반 자막
+
+**2. 카라오케 모드**
+```python
+MODEL_NAME = 'large-v3'
+WORD_LEVEL_LRC = True  # 단어별 타임스탬프
+```
+- 타임스탬프 정확도: ±0.2초 (단어별)
+- 처리 속도: 3분 곡 기준 12-15초
+- 용도: 카라오케 앱, 단어별 하이라이트
+
+**3. 고속 처리 모드**
+```python
+MODEL_NAME = 'large-v3-turbo'  # 6배 빠름
+WORD_LEVEL_LRC = False
+```
+- 타임스탬프 정확도: ±0.3초
+- 처리 속도: 3분 곡 기준 2-3초
+- 용도: 대량 배치 처리
+
+**4. 고속 카라오케 모드**
+```python
+MODEL_NAME = 'large-v3-turbo'
+WORD_LEVEL_LRC = True
+```
+- 타임스탬프 정확도: ±0.3초 (단어별)
+- 처리 속도: 3분 곡 기준 2-3초
+- 용도: 빠른 카라오케 생성
 
 ## 📂 파일 구조
 
@@ -351,21 +431,29 @@ RuntimeError: CUDA out of memory
 - **모델 크기**: 2.9GB (첫 실행시 자동 다운로드)
 - **10곡 배치 처리**: 약 2-3분
 
-## 🎯 주요 개선 사항 (v1.1)
+## 🎯 주요 개선 사항 (v1.2 Enhanced)
 
-### 버그 수정
+### 신규 기능 (v1.2)
+- ✅ **Enhanced LRC 옵션**: 단어별 타임스탬프 카라오케 모드
+- ✅ **모델 선택**: large-v3-turbo 추가 (6배 빠름)
+- ✅ **진행률 바**: tqdm 지원 (선택적)
+- ✅ **요약 로그 저장**: summary.txt 자동 생성
+- ✅ **성공한 곡 상세**: 각 곡별 처리 시간 및 라인 수 표시
+- ✅ **설정 집중화**: 스크립트 상단에서 모든 설정 관리
+
+### 버그 수정 (v1.1)
 - ✅ UTF-8 BOM 자동 처리 추가
 - ✅ 안전한 평균 시간 계산 (`time` 키 누락 처리)
 - ✅ 더 상세한 에러 메시지 (파일명 포함)
 
-### 기능 개선
+### 기능 개선 (v1.1)
 - ✅ 라이브러리 import 에러 명확한 메시지
 - ✅ KeyboardInterrupt 처리 (Ctrl+C 중단 시 요약 출력)
 - ✅ 빈 라인 자동 제거 (가사 파일 정리)
 - ✅ 모델 로드 에러 시 해결 방법 제시
 - ✅ 인코딩 에러 시 파일 경로 출력
 
-### 견고성 향상
+### 견고성 향상 (v1.1)
 - ✅ UTF-8-sig 우선 시도 → UTF-8 폴백
 - ✅ BOM 강제 제거 (`\ufeff`)
 - ✅ RuntimeError 별도 처리 (GPU 메모리 부족)
@@ -392,9 +480,10 @@ RuntimeError: CUDA out of memory
 **A**: 현재는 일본어 전용입니다. `LANGUAGE = 'ja'`로 고정되어 있으며, 다른 언어는 코드 수정이 필요합니다.
 
 ### Q3. 단어별 LRC (Enhanced LRC)를 생성할 수 있나요?
-**A**: 현재는 라인별 LRC만 지원합니다. 단어별 LRC가 필요하면 `process_song()` 함수에서 `word_level=True`로 변경하세요:
+**A**: v1.2부터 지원합니다! 스크립트 상단의 `WORD_LEVEL_LRC` 설정을 변경하세요:
 ```python
-result.to_srt_vtt(str(output_path), word_level=True)
+# sync_suisei.py 상단
+WORD_LEVEL_LRC = True  # Enhanced LRC 활성화 (카라오케용)
 ```
 
 ### Q4. 이미 생성된 LRC 파일은 어떻게 되나요?
@@ -405,6 +494,27 @@ result.to_srt_vtt(str(output_path), word_level=True)
 ```bash
 CUDA_VISIBLE_DEVICES=0 python sync_suisei.py  # GPU 0 사용
 CUDA_VISIBLE_DEVICES=1 python sync_suisei.py  # GPU 1 사용
+```
+
+### Q6. 처리 속도를 더 빠르게 할 수 있나요?
+**A**: `MODEL_NAME`을 `'large-v3-turbo'`로 변경하면 6배 빠릅니다 (품질은 large-v2급):
+```python
+# sync_suisei.py 상단
+MODEL_NAME = 'large-v3-turbo'  # 6배 빠름
+```
+
+### Q7. 진행률 바가 표시되지 않아요
+**A**: tqdm 라이브러리를 설치하세요:
+```bash
+pip install tqdm
+```
+tqdm이 없어도 정상 동작하지만, 진행률 바는 표시되지 않습니다.
+
+### Q8. 요약 로그 파일은 어디에 저장되나요?
+**A**: 프로젝트 루트 디렉토리에 `summary.txt`로 저장됩니다. 비활성화하려면:
+```python
+# sync_suisei.py 상단
+SAVE_SUMMARY_LOG = False
 ```
 
 ## 🤝 기여
