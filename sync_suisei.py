@@ -12,11 +12,24 @@ MP3 + 일본어 가사 → LRC 자막 생성
     - RTX 3070 Ti (또는 동급 GPU)
 """
 
-import stable_whisper
-import torch
+import sys
 from pathlib import Path
 import time
-import sys
+
+# 라이브러리 import 에러 처리
+try:
+    import torch
+except ImportError:
+    print("❌ 오류: PyTorch가 설치되지 않았습니다!")
+    print("   설치: pip install torch --index-url https://download.pytorch.org/whl/cu124")
+    sys.exit(1)
+
+try:
+    import stable_whisper
+except ImportError:
+    print("❌ 오류: stable-whisper가 설치되지 않았습니다!")
+    print("   설치: pip install stable-ts")
+    sys.exit(1)
 
 # 상수 정의
 SONGS_DIR = 'songs'
@@ -135,17 +148,29 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
     """단일 곡 처리: 가사 정렬 + LRC 저장"""
 
     try:
-        # [1] 가사 읽기 (UTF-8)
-        with open(lyrics_path, 'r', encoding='utf-8') as f:
-            lyrics = f.read().strip()
+        # [1] 가사 읽기 (UTF-8-sig로 BOM 처리)
+        try:
+            with open(lyrics_path, 'r', encoding='utf-8-sig') as f:
+                lyrics = f.read().strip()
+        except UnicodeDecodeError:
+            # UTF-8-sig 실패 시 UTF-8 시도
+            with open(lyrics_path, 'r', encoding='utf-8') as f:
+                lyrics = f.read().strip()
+
+        # BOM 제거 (혹시 남아있을 경우)
+        lyrics = lyrics.lstrip('\ufeff')
 
         # 빈 가사 확인
         if not lyrics:
             print(f"❌ 오류: 가사 파일이 비어 있습니다.")
             return {'success': False, 'error': '빈 가사 파일'}
 
+        # 빈 라인 제거 (불필요한 빈 라인 정리)
+        lyrics_lines = [line for line in lyrics.split('\n') if line.strip()]
+        lyrics = '\n'.join(lyrics_lines)
+
         # 가사 라인 수 계산
-        lines = len([l for l in lyrics.split('\n') if l.strip()])
+        lines = len(lyrics_lines)
         print(f"📝 가사 라인: {lines}개")
 
         # [2] 모델 정렬 (Forced Alignment)
@@ -179,21 +204,23 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
 
     except UnicodeDecodeError as e:
         print(f"❌ 오류: 인코딩 오류 (UTF-8 필요)")
-        print(f"   {e}")
+        print(f"   파일: {lyrics_path}")
+        print(f"   상세: {e}")
         print()
-        return {'success': False, 'error': f'인코딩 오류: {e}'}
+        return {'success': False, 'error': f'인코딩 오류'}
 
     except FileNotFoundError as e:
         print(f"❌ 오류: 파일 없음")
         print(f"   {e}")
         print()
-        return {'success': False, 'error': f'파일 없음: {e}'}
+        return {'success': False, 'error': f'파일 없음'}
 
     except Exception as e:
         print(f"❌ 오류: {type(e).__name__}")
-        print(f"   {e}")
+        print(f"   파일: {mp3_path.name}")
+        print(f"   상세: {e}")
         print()
-        return {'success': False, 'error': f'{type(e).__name__}: {e}'}
+        return {'success': False, 'error': f'{type(e).__name__}'}
 
 
 def print_summary(results: list[dict], total_time: float) -> None:
@@ -202,7 +229,7 @@ def print_summary(results: list[dict], total_time: float) -> None:
     print("=" * 60)
 
     # 성공/실패 집계
-    success_count = sum(1 for r in results if r['success'])
+    success_count = sum(1 for r in results if r.get('success', False))
     fail_count = len(results) - success_count
 
     if fail_count == 0:
@@ -219,9 +246,9 @@ def print_summary(results: list[dict], total_time: float) -> None:
     if fail_count > 0:
         print()
         print("실패한 곡:")
-        for i, r in enumerate(results):
-            if not r['success']:
-                song_name = r.get('name', f'곡{i+1}')
+        for r in results:
+            if not r.get('success', False):
+                song_name = r.get('name', '알 수 없음')
                 error = r.get('error', '알 수 없는 오류')
                 print(f"  - {song_name}: {error}")
 
@@ -229,9 +256,12 @@ def print_summary(results: list[dict], total_time: float) -> None:
     print()
     print(f"총 소요시간: {total_time:.1f}초 ({total_time/60:.1f}분)")
 
+    # 평균 처리 시간 (안전하게 계산)
     if success_count > 0:
-        avg_time = sum(r['time'] for r in results if r['success']) / success_count
-        print(f"평균 처리 시간: {avg_time:.1f}초/곡")
+        successful_times = [r.get('time', 0) for r in results if r.get('success', False) and 'time' in r]
+        if successful_times:
+            avg_time = sum(successful_times) / len(successful_times)
+            print(f"평균 처리 시간: {avg_time:.1f}초/곡")
 
     print("=" * 60)
 
@@ -239,60 +269,78 @@ def print_summary(results: list[dict], total_time: float) -> None:
 def main() -> None:
     """배치 처리 메인 로직"""
 
-    # [1] 환경 검증
-    if not verify_environment():
-        sys.exit(1)
-
-    # [2] 파일 검증
-    songs = verify_files(SONGS_DIR, LYRICS_DIR)
-
-    if not songs:
-        print("❌ 처리할 곡이 없습니다.")
-        print(f"   '{SONGS_DIR}/' 폴더에 MP3 파일을 추가하고")
-        print(f"   '{LYRICS_DIR}/' 폴더에 대응하는 가사 파일(.txt)을 추가하세요.")
-        sys.exit(1)
-
-    # [3] 모델 로드
-    print("🔄 large-v3 모델 로딩 중...")
-    print("   (첫 실행시 2.9GB 다운로드됩니다)")
-    print()
-
     try:
-        model = stable_whisper.load_model(MODEL_NAME, device='cuda')
-    except Exception as e:
-        print(f"❌ 모델 로드 실패: {e}")
-        sys.exit(1)
+        # [1] 환경 검증
+        if not verify_environment():
+            sys.exit(1)
 
-    print("✅ 모델 로딩 완료!")
-    print()
+        # [2] 파일 검증
+        songs = verify_files(SONGS_DIR, LYRICS_DIR)
 
-    # [4] 배치 처리
-    total_start = time.time()
-    results = []
+        if not songs:
+            print("❌ 처리할 곡이 없습니다.")
+            print(f"   '{SONGS_DIR}/' 폴더에 MP3 파일을 추가하고")
+            print(f"   '{LYRICS_DIR}/' 폴더에 대응하는 가사 파일(.txt)을 추가하세요.")
+            sys.exit(1)
 
-    for i, song in enumerate(songs, 1):
-        print(f"[{i}/{len(songs)}] 처리 중: {song['name']}")
-        print("-" * 60)
+        # [3] 모델 로드
+        print("🔄 large-v3 모델 로딩 중...")
+        print("   (첫 실행시 2.9GB 다운로드됩니다)")
+        print()
 
-        result = process_song(
-            model,
-            song['mp3'],
-            song['lyrics'],
-            song['output']
-        )
+        try:
+            model = stable_whisper.load_model(MODEL_NAME, device='cuda')
+        except RuntimeError as e:
+            print(f"❌ 모델 로드 실패: GPU 메모리 부족 또는 CUDA 오류")
+            print(f"   상세: {e}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ 모델 로드 실패: {type(e).__name__}")
+            print(f"   상세: {e}")
+            print()
+            print("해결 방법:")
+            print("  1. 인터넷 연결 확인 (모델 다운로드)")
+            print("  2. stable-ts 버전 확인: pip install --upgrade stable-ts")
+            print("  3. GPU 메모리 확인: nvidia-smi")
+            sys.exit(1)
 
-        # 결과에 곡 이름 추가 (요약용)
-        result['name'] = song['name']
-        results.append(result)
+        print("✅ 모델 로딩 완료!")
+        print()
 
-    total_time = time.time() - total_start
+        # [4] 배치 처리
+        total_start = time.time()
+        results = []
 
-    # [5] 요약 출력
-    print_summary(results, total_time)
+        for i, song in enumerate(songs, 1):
+            print(f"[{i}/{len(songs)}] 처리 중: {song['name']}")
+            print("-" * 60)
 
-    # [6] GPU 메모리 정리
-    del model
-    torch.cuda.empty_cache()
+            result = process_song(
+                model,
+                song['mp3'],
+                song['lyrics'],
+                song['output']
+            )
+
+            # 결과에 곡 이름 추가 (요약용)
+            result['name'] = song['name']
+            results.append(result)
+
+        total_time = time.time() - total_start
+
+        # [5] 요약 출력
+        print_summary(results, total_time)
+
+        # [6] GPU 메모리 정리
+        del model
+        torch.cuda.empty_cache()
+
+    except KeyboardInterrupt:
+        print("\n\n⚠️ 사용자가 중단했습니다.")
+        if 'results' in locals() and results:
+            total_time = time.time() - total_start
+            print_summary(results, total_time)
+        sys.exit(0)
 
 
 if __name__ == '__main__':
