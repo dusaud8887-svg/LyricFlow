@@ -1,8 +1,12 @@
 """
-호시마치 스이세이 가사 싱크 스크립트 (v2.0 Ultimate)
+호시마치 스이세이 가사 싱크 스크립트 (v2.1 Line-Preserve)
 MP3 + 일본어 가사 → LRC 자막 생성
 
-v2.0 신규 기능:
+v2.1 신규 기능:
+    - ⭐ 줄바꿈 보존 모드 (사용자 소절 유지)
+    - 소절 기반 품질 검증
+
+v2.0 기능 (유지):
     - Demucs 보컬 분리 (선택적)
     - VAD (Voice Activity Detection)
     - 세그먼트 최적화 (4단계 체인)
@@ -78,7 +82,7 @@ SUMMARY_LOG_FILE = 'summary.txt'
 # ============================================================
 
 # ⭐ v2.1: 줄바꿈 보존 모드 (핵심 개선!)
-# True: 가사 파일의 줄바꿈을 그대로 유지 → 소절별 타임스탭프 (권장!)
+# True: 가사 파일의 줄바꿈을 그대로 유지 → 소절별 타임스탬프 (권장!)
 # False: 자동으로 세그먼트 분할 (글자 수 기반)
 PRESERVE_LINES = True
 
@@ -579,6 +583,7 @@ def print_summary(results: list[dict], total_time: float, save_to_file: bool = F
     summary_lines.append(f"성공: {success_count}곡")
     summary_lines.append(f"실패: {fail_count}곡")
     summary_lines.append(f"모델: {MODEL_NAME}")
+    summary_lines.append(f"⭐ 줄바꿈 보존: {'활성화 (소절 유지)' if PRESERVE_LINES else '비활성화 (자동 분할)'}")
     summary_lines.append(f"LRC 타입: {'Enhanced (단어별)' if WORD_LEVEL_LRC else '일반 (라인별)'}")
     summary_lines.append(f"Demucs: {'활성화' if USE_DEMUCS else '비활성화'}")
     summary_lines.append(f"VAD: {'활성화' if USE_VAD else '비활성화'}")
