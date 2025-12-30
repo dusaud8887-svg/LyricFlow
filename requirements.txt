@@ -1,0 +1,20 @@
+# LineSync - AI-Powered Lyrics Synchronization Tool
+# Core dependencies for subtitle generation
+
+# PyTorch (CUDA support required for GPU acceleration)
+# Install with: pip install torch --index-url https://download.pytorch.org/whl/cu124
+torch>=2.0.0
+
+# Whisper-based audio alignment
+stable-ts>=2.15.0
+
+# Optional: Progress bar (recommended)
+tqdm>=4.66.0
+
+# Optional: Vocal separation (advanced quality mode)
+# Uncomment if you want to use Demucs vocal separation
+# demucs>=4.0.0
+
+# Build tool for creating executables
+# Only needed for building standalone executables
+pyinstaller>=6.0.0
