@@ -662,6 +662,4 @@ Copyright (c) 2025 dusaud8887-svg
 
 ---
 
-**Made with ❤️ for Hoshimachi Suisei fans**
-
 *Last updated: 2025-12-28*

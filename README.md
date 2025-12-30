@@ -260,10 +260,6 @@ MIT License - see [LICENSE](LICENSE) file
 
 - 🐛 [Report Issues](https://github.com/YOUR_USERNAME/LyricFlow/issues)
 - 💡 [Feature Requests](https://github.com/YOUR_USERNAME/LyricFlow/discussions)
-- ⭐ Star us on GitHub!
+- ⭐ [Star the project](https://github.com/YOUR_USERNAME/LyricFlow)
 
 ---
-
-<p align="center">
-  <strong>Let your lyrics flow with perfect timing</strong> 🎵
-</p>

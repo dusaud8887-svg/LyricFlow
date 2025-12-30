@@ -400,8 +400,7 @@ def main():
             show_system_info()
             input("\nPress Enter to continue...")
         elif choice == '0':
-            print("\n👋 Thanks for using LyricFlow!")
-            print("   Star us on GitHub: https://github.com/YOUR_USERNAME/LyricFlow\n")
+            print("\n👋 Goodbye!")
             sys.exit(0)
         else:
             print("\n❌ Invalid option. Please try again.")
