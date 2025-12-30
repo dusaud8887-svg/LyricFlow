@@ -206,7 +206,11 @@ python build.py
 ### CUDA Not Detected
 
 ```bash
-# Reinstall PyTorch with CUDA
+# Reinstall PyTorch with CUDA (uv - recommended)
+uv pip uninstall torch
+uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+# Or with pip
 pip uninstall torch
 pip install torch --index-url https://download.pytorch.org/whl/cu124
 ```

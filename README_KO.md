@@ -98,40 +98,49 @@
 
 ## 🚀 설치
 
-### 1. Python 환경 확인
+### 방법 1: uv 사용 (권장 - 빠르고 안정적)
 
 ```bash
+# 1. uv 설치
+curl -LsSf https://astral.sh/uv/install.sh | sh  # Linux/Mac
+# 또는
+pip install uv  # Windows
+
+# 2. 저장소 클론
+git clone https://github.com/dusaud8887-svg/mp3.git
+cd mp3
+
+# 3. 의존성 설치
+uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+uv pip install stable-ts
+
+# 4. 폴더 구조 확인
+mkdir -p songs lyrics output
+```
+
+### 방법 2: 기존 pip 사용
+
+```bash
+# 1. Python 환경 확인
 python --version
 # Python 3.10 이상이어야 함
-```
 
-### 2. GPU 드라이버 설치 확인
-
-```bash
+# 2. GPU 드라이버 설치 확인
 nvidia-smi
 # GPU 정보가 출력되어야 함
-```
 
-### 3. 필수 라이브러리 설치
-
-```bash
+# 3. 필수 라이브러리 설치
 # PyTorch (CUDA 12.4)
 pip install torch --index-url https://download.pytorch.org/whl/cu124
 
 # stable-whisper
 pip install stable-ts
-```
 
-### 4. 저장소 클론
-
-```bash
+# 4. 저장소 클론
 git clone https://github.com/dusaud8887-svg/mp3.git
 cd mp3
-```
 
-### 5. 폴더 구조 확인
-
-```bash
+# 5. 폴더 구조 확인
 mkdir -p songs lyrics output
 ls -la
 ```
@@ -427,6 +436,11 @@ vlc songs/stellar_stellar.mp3
 
 2. PyTorch CUDA 버전 재설치
    ```bash
+   # uv 사용 (권장)
+   uv pip uninstall torch
+   uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+   # 또는 pip 사용
    pip uninstall torch
    pip install torch --index-url https://download.pytorch.org/whl/cu124
    ```
