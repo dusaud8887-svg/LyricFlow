@@ -160,6 +160,129 @@ def clean_lyrics(text: str, preserve_lines: bool = True) -> str:
         return '\n'.join(lines)
 
 
+def save_as_lrc(result, output_path: str, word_level: bool = False) -> None:
+    """
+    결과를 LRC 형식으로 저장
+
+    Args:
+        result: stable-ts 결과 객체
+        output_path: 저장할 LRC 파일 경로
+        word_level: True이면 단어별, False이면 라인별
+    """
+    from pathlib import Path
+
+    output_file = Path(output_path)
+
+    with open(output_file, 'w', encoding='utf-8') as f:
+        for segment in result.segments:
+            if word_level and hasattr(segment, 'words'):
+                # Enhanced LRC: 단어별 타임스탬프
+                for word in segment.words:
+                    minutes = int(word.start // 60)
+                    seconds = word.start % 60
+                    timestamp = f"[{minutes:02d}:{seconds:05.2f}]"
+                    f.write(f"{timestamp} {word.word.strip()}\n")
+            else:
+                # 일반 LRC: 라인별 타임스탬프
+                minutes = int(segment.start // 60)
+                seconds = segment.start % 60
+                timestamp = f"[{minutes:02d}:{seconds:05.2f}]"
+                text = segment.text.strip()
+                f.write(f"{timestamp} {text}\n")
+
+
+def regroup_by_original_lines(result, original_lines: list[str]):
+    """
+    원본 가사의 줄바꿈을 기준으로 세그먼트 재그룹화 (v2.1)
+
+    원본 라인의 텍스트와 세그먼트를 매칭하여 새로운 세그먼트 생성
+
+    Args:
+        result: stable-ts 결과 객체
+        original_lines: 원본 가사의 각 라인 리스트
+
+    Returns:
+        재그룹화된 result 객체
+    """
+    try:
+        # 모든 단어 타임스탬프 수집 (word-level 정보가 있다면)
+        if not result.segments:
+            return result
+
+        # 전체 텍스트에서 단어별 타임스탬프 추출
+        all_words = []
+        for segment in result.segments:
+            if hasattr(segment, 'words') and segment.words:
+                all_words.extend(segment.words)
+            else:
+                # words가 없으면 segment 자체를 단어로 사용
+                class WordLike:
+                    def __init__(self, text, start, end):
+                        self.word = text
+                        self.start = start
+                        self.end = end
+                all_words.append(WordLike(segment.text, segment.start, segment.end))
+
+        if not all_words:
+            return result
+
+        # 원본 라인별로 새 세그먼트 생성
+        new_segments = []
+        word_index = 0
+
+        for line_text in original_lines:
+            # 공백 제거하여 비교
+            line_text_clean = line_text.replace(' ', '').replace('\u3000', '')
+
+            # 이 라인에 해당하는 단어들 찾기
+            line_words = []
+            accumulated_text = ''
+
+            while word_index < len(all_words):
+                word = all_words[word_index]
+                word_text = word.word.strip().replace(' ', '').replace('\u3000', '')
+                accumulated_text += word_text
+                line_words.append(word)
+                word_index += 1
+
+                # 현재까지 누적된 텍스트가 라인 텍스트와 충분히 일치하면 중단
+                # 90% 이상 일치 시 해당 라인으로 간주
+                if len(accumulated_text) >= len(line_text_clean) * 0.9:
+                    break
+                # 너무 길어지면 (130% 초과) 강제 중단
+                elif len(accumulated_text) > len(line_text_clean) * 1.3:
+                    break
+                # 마지막 단어에 도달하면 중단
+                elif word_index >= len(all_words):
+                    break
+
+            # 라인에 대한 세그먼트 생성
+            if line_words:
+                class NewSegment:
+                    def __init__(self, text, start, end, words=None):
+                        self.text = text
+                        self.start = start
+                        self.end = end
+                        self.words = words if words else []
+
+                    def has_words(self):
+                        return bool(self.words)
+
+                segment_start = line_words[0].start
+                segment_end = line_words[-1].end
+                new_segments.append(NewSegment(line_text, segment_start, segment_end, line_words))
+
+        # 결과 객체의 segments를 교체
+        if new_segments:
+            result.segments = new_segments
+
+    except Exception as e:
+        # 재그룹이 실패하면 경고만 출력
+        print(f"   ⚠️ 줄바꿈 재그룹 실패: {e}")
+
+    return result
+
+
 def optimize_segments(result, profile: str = 'normal', preserve_lines: bool = False):
     """
     세그먼트 4단계 최적화 체인 (v2.1)
@@ -196,15 +319,15 @@ def optimize_segments(result, profile: str = 'normal', preserve_lines: bool = Fa
 
     cfg = PROFILES.get(profile, PROFILES['normal'])
 
-    # === 타임스탬프 보정 (항상 수행) ===
-    result.clamp_max()
-
     # === v2.1: 줄바꿈 보존 모드 처리 ===
     if preserve_lines:
         # 줄바꿈 보존 모드: 최소 최적화만 수행
-        # - 타임스탬프 보정만 수행 (위에서 완료)
+        # NewSegment 객체에는 clamp_max() 메서드가 없으므로 스킵
         # - 세그먼트 분할/병합 스킵 (사용자 줄바꿈 보존!)
         return result
+
+    # === 타임스탬프 보정 (자동 분할 모드만) ===
+    result.clamp_max()
 
     # === 4단계 최적화 체인 (자동 분할 모드) ===
 
@@ -495,9 +618,12 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
 
         # [3] 세그먼트 최적화 (v2.1: 줄바꿈 보존 고려!)
         if PRESERVE_LINES:
-            # 줄바꿈 보존 모드: 최소 최적화만
+            # 줄바꿈 보존 모드: 타임스탬프 보정 -> 줄바꿈 기준 재그룹
             print(f"✂️ 타임스탬프 보정 중... (소절 보존 모드)")
-            optimize_segments(result, profile=SEGMENT_PROFILE, preserve_lines=True)
+            # 먼저 타임스탬프 보정 (stable-ts 메서드)
+            result.clamp_max()
+            # 그 다음 원본 가사 라인별로 재그룹 (NewSegment로 교체)
+            result = regroup_by_original_lines(result, lyrics_lines)
             print(f"   ✓ 보정 완료 ({len(result.segments)}개 세그먼트 - 소절 유지)")
         else:
             # 자동 분할 모드: 4단계 최적화 체인
@@ -514,7 +640,7 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
                 print(f"   ⚠️ {warning}")
 
         # [5] LRC 저장
-        result.to_srt_vtt(str(output_path), word_level=WORD_LEVEL_LRC)
+        save_as_lrc(result, str(output_path), word_level=WORD_LEVEL_LRC)
 
         # [6] 결과 출력
         file_size = output_path.stat().st_size / 1024  # KB
