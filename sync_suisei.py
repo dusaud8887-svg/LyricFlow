@@ -160,6 +160,58 @@ def clean_lyrics(text: str, preserve_lines: bool = True) -> str:
         return '\n'.join(lines)
 
 
+def save_as_lrc(result, output_path: str, word_level: bool = False) -> None:
+    """
+    결과를 LRC 형식으로 저장
+
+    Args:
+        result: stable-ts 결과 객체
+        output_path: 저장할 LRC 파일 경로
+        word_level: True이면 단어별, False이면 라인별
+    """
+    from pathlib import Path
+
+    output_file = Path(output_path)
+
+    with open(output_file, 'w', encoding='utf-8') as f:
+        for segment in result.segments:
+            if word_level and hasattr(segment, 'words'):
+                # Enhanced LRC: 단어별 타임스탬프
+                for word in segment.words:
+                    minutes = int(word.start // 60)
+                    seconds = word.start % 60
+                    timestamp = f"[{minutes:02d}:{seconds:05.2f}]"
+                    f.write(f"{timestamp} {word.word.strip()}\n")
+            else:
+                # 일반 LRC: 라인별 타임스탬프
+                minutes = int(segment.start // 60)
+                seconds = segment.start % 60
+                timestamp = f"[{minutes:02d}:{seconds:05.2f}]"
+                text = segment.text.strip()
+                f.write(f"{timestamp} {text}\n")
+
+
+def regroup_by_original_lines(result):
+    """
+    원본 가사의 줄바꿈을 기준으로 세그먼트 재그룹화 (v2.1)
+
+    Args:
+        result: stable-ts 결과 객체
+
+    Returns:
+        재그룹화된 result 객체
+    """
+    try:
+        # 줄바꿈 문자를 기준으로 세그먼트 분할
+        # cm_sp: 특정 문자로 분할
+        result = result.split_by_punctuation([('\n', ' ')])
+    except Exception as e:
+        # 분할이 실패하면 경고만 출력
+        print(f"   ⚠️ 줄바꿈 재그룹 실패: {e}")
+
+    return result
+
+
 def optimize_segments(result, profile: str = 'normal', preserve_lines: bool = False):
     """
     세그먼트 4단계 최적화 체인 (v2.1)
@@ -495,8 +547,9 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
 
         # [3] 세그먼트 최적화 (v2.1: 줄바꿈 보존 고려!)
         if PRESERVE_LINES:
-            # 줄바꿈 보존 모드: 최소 최적화만
+            # 줄바꿈 보존 모드: 줄바꿈 기준 재그룹 + 최소 최적화
             print(f"✂️ 타임스탬프 보정 중... (소절 보존 모드)")
+            result = regroup_by_original_lines(result)
             optimize_segments(result, profile=SEGMENT_PROFILE, preserve_lines=True)
             print(f"   ✓ 보정 완료 ({len(result.segments)}개 세그먼트 - 소절 유지)")
         else:
@@ -514,7 +567,7 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
                 print(f"   ⚠️ {warning}")
 
         # [5] LRC 저장
-        result.to_srt_vtt(str(output_path), word_level=WORD_LEVEL_LRC)
+        save_as_lrc(result, str(output_path), word_level=WORD_LEVEL_LRC)
 
         # [6] 결과 출력
         file_size = output_path.stat().st_size / 1024  # KB
