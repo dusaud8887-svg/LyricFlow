@@ -1,20 +1,38 @@
-# LineSync - AI-Powered Lyrics Synchronization Tool
+# LyricFlow - AI-Powered Lyrics Synchronization Tool
 # Core dependencies for subtitle generation
 
-# PyTorch (CUDA support required for GPU acceleration)
-# Install with: pip install torch --index-url https://download.pytorch.org/whl/cu124
-torch>=2.0.0
+# ============================================================
+# INSTALLATION ORDER (IMPORTANT!)
+# ============================================================
+# 1. Install PyTorch with CUDA first:
+#    pip install torch --index-url https://download.pytorch.org/whl/cu124
+#
+# 2. Then install other dependencies:
+#    pip install -r requirements.txt
+#
+# OR use uv (recommended):
+#    uv sync
+# ============================================================
+
+# PyTorch (CUDA 12.4 required for GPU acceleration)
+# ⚠️ Install separately with CUDA support:
+# pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+torch>=2.0.0,<3.0.0
 
 # Whisper-based audio alignment
-stable-ts>=2.15.0
+stable-ts>=2.15.0,<3.0.0
 
-# Optional: Progress bar (recommended)
-tqdm>=4.66.0
+# Progress bar (recommended)
+tqdm>=4.66.0,<5.0.0
 
-# Optional: Vocal separation (advanced quality mode)
-# Uncomment if you want to use Demucs vocal separation
-# demucs>=4.0.0
+# ============================================================
+# OPTIONAL DEPENDENCIES
+# ============================================================
 
-# Build tool for creating executables
-# Only needed for building standalone executables
-pyinstaller>=6.0.0
+# Vocal separation (advanced quality mode, 3x slower)
+# Uncomment if you want to use Demucs vocal separation:
+# demucs>=4.0.0,<5.0.0
+
+# Build tool for creating standalone executables
+# Only needed for distribution:
+# pyinstaller>=6.0.0,<7.0.0

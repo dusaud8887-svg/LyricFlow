@@ -13,6 +13,7 @@ from pathlib import Path
 
 # 기존 모듈 import
 try:
+    import sync_suisei
     from sync_suisei import (
         verify_environment, verify_files, process_song, print_summary,
         stable_whisper, torch, time,
@@ -21,6 +22,7 @@ try:
     )
 except ImportError as e:
     print(f"❌ Error: Failed to import core modules: {e}")
+    print("   Make sure sync_suisei.py is in the same directory.")
     sys.exit(1)
 
 # Global language setting (can be changed by user)
@@ -168,6 +170,8 @@ def change_language():
     if choice in LANGUAGES:
         lang_code, lang_name = LANGUAGES[choice]
         CURRENT_LANGUAGE = lang_code
+        # ⭐ 중요: sync_suisei 모듈의 LANGUAGE도 변경 (실제 적용)
+        sync_suisei.LANGUAGE = lang_code
         print(f"\n✅ Language changed to: {lang_name}")
         print(f"   Code: {lang_code}")
         print("\n💡 Note: This change applies only to this session.")
@@ -348,8 +352,29 @@ def single_process():
         input("\nPress Enter to continue...")
 
 
+def ensure_folders():
+    """필요한 폴더 자동 생성"""
+    folders = [SONGS_DIR, LYRICS_DIR, OUTPUT_DIR]
+    created = []
+
+    for folder in folders:
+        folder_path = Path(folder)
+        if not folder_path.exists():
+            folder_path.mkdir(parents=True, exist_ok=True)
+            created.append(folder)
+
+    if created:
+        print("📁 Created missing folders:")
+        for folder in created:
+            print(f"   ✅ {folder}/")
+        print()
+
+
 def main():
     """메인 함수"""
+    # 첫 실행 시 폴더 자동 생성
+    ensure_folders()
+
     while True:
         # 화면 클리어 (선택적)
         if os.name == 'nt':  # Windows

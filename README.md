@@ -9,7 +9,13 @@ Generate perfectly timed LRC subtitle files from MP3 audio and lyrics using Open
 ![GPU](https://img.shields.io/badge/GPU-CUDA_Required-green.svg)
 ![Version](https://img.shields.io/badge/version-2.1-brightgreen.svg)
 
-[한국어 문서](README_KO.md) • [English](README.md)
+[한국어 문서](README_KO.md) • [English](README.md) • [Quick Start](QUICKSTART.md)
+
+---
+
+## 🚀 Quick Start
+
+**New to LyricFlow? Start here:** [5-Minute Quick Start Guide](QUICKSTART.md)
 
 ---
 

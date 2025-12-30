@@ -3,12 +3,12 @@ name = "lyricflow"
 version = "2.1.0"
 description = "AI-Powered Lyrics Synchronization Tool with Line Preservation"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = { text = "MIT" }
 authors = [
     { name = "LyricFlow Contributors" }
 ]
-keywords = ["lyrics", "subtitle", "lrc", "whisper", "synchronization", "karaoke", "japanese"]
+keywords = ["lyrics", "subtitle", "lrc", "whisper", "synchronization", "karaoke", "japanese", "music", "ai"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",
@@ -19,12 +19,14 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Sound/Audio",
     "Topic :: Text Processing",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
 ]
 
 dependencies = [
-    "torch>=2.0.0",
-    "stable-ts>=2.15.0",
-    "tqdm>=4.66.0",
+    "torch>=2.0.0,<3.0.0",
+    "stable-ts>=2.15.0,<3.0.0",
+    "tqdm>=4.66.0,<5.0.0",
 ]
 
 [project.optional-dependencies]

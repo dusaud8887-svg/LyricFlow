@@ -48,6 +48,12 @@ build_cmd = [
 # 콘솔 윈도우 유지 (CLI 도구이므로)
 build_cmd.append("--console")
 
+# 추가 모듈 포함 (중요!)
+build_cmd.extend(["--hidden-import", "sync_suisei"])
+build_cmd.extend(["--hidden-import", "stable_whisper"])
+build_cmd.extend(["--hidden-import", "torch"])
+build_cmd.extend(["--hidden-import", "tqdm"])
+
 # 아이콘 추가 (있을 경우)
 if ICON_FILE and Path(ICON_FILE).exists():
     build_cmd.extend(["--icon", ICON_FILE])
