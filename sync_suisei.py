@@ -487,8 +487,7 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
             result = model.align(
                 str(mp3_path),
                 lyrics,
-                language=LANGUAGE,
-                initial_prompt=INITIAL_PROMPT if INITIAL_PROMPT else None
+                language=LANGUAGE
             )
 
         elapsed = time.time() - start
