@@ -245,11 +245,15 @@ def regroup_by_original_lines(result, original_lines: list[str]):
                 line_words.append(word)
                 word_index += 1
 
-                # 현재까지 누적된 텍스트가 라인 텍스트와 일치하면 중단
-                if line_text_clean.startswith(accumulated_text) and len(accumulated_text) >= len(line_text_clean) * 0.8:
+                # 현재까지 누적된 텍스트가 라인 텍스트와 충분히 일치하면 중단
+                # 90% 이상 일치 시 해당 라인으로 간주
+                if len(accumulated_text) >= len(line_text_clean) * 0.9:
                     break
-                elif len(accumulated_text) > len(line_text_clean) * 1.5:
-                    # 너무 길어지면 중단
+                # 너무 길어지면 (130% 초과) 강제 중단
+                elif len(accumulated_text) > len(line_text_clean) * 1.3:
+                    break
+                # 마지막 단어에 도달하면 중단
+                elif word_index >= len(all_words):
                     break
 
             # 라인에 대한 세그먼트 생성
@@ -315,15 +319,15 @@ def optimize_segments(result, profile: str = 'normal', preserve_lines: bool = Fa
 
     cfg = PROFILES.get(profile, PROFILES['normal'])
 
-    # === 타임스탬프 보정 (항상 수행) ===
-    result.clamp_max()
-
     # === v2.1: 줄바꿈 보존 모드 처리 ===
     if preserve_lines:
         # 줄바꿈 보존 모드: 최소 최적화만 수행
-        # - 타임스탬프 보정만 수행 (위에서 완료)
+        # NewSegment 객체에는 clamp_max() 메서드가 없으므로 스킵
         # - 세그먼트 분할/병합 스킵 (사용자 줄바꿈 보존!)
         return result
+
+    # === 타임스탬프 보정 (자동 분할 모드만) ===
+    result.clamp_max()
 
     # === 4단계 최적화 체인 (자동 분할 모드) ===
 
@@ -614,10 +618,12 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
 
         # [3] 세그먼트 최적화 (v2.1: 줄바꿈 보존 고려!)
         if PRESERVE_LINES:
-            # 줄바꿈 보존 모드: 줄바꿈 기준 재그룹 + 최소 최적화
+            # 줄바꿈 보존 모드: 타임스탬프 보정 -> 줄바꿈 기준 재그룹
             print(f"✂️ 타임스탬프 보정 중... (소절 보존 모드)")
+            # 먼저 타임스탬프 보정 (stable-ts 메서드)
+            result.clamp_max()
+            # 그 다음 원본 가사 라인별로 재그룹 (NewSegment로 교체)
             result = regroup_by_original_lines(result, lyrics_lines)
-            optimize_segments(result, profile=SEGMENT_PROFILE, preserve_lines=True)
             print(f"   ✓ 보정 완료 ({len(result.segments)}개 세그먼트 - 소절 유지)")
         else:
             # 자동 분할 모드: 4단계 최적화 체인
