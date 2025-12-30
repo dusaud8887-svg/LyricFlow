@@ -255,14 +255,18 @@ def regroup_by_original_lines(result, original_lines: list[str]):
             # 라인에 대한 세그먼트 생성
             if line_words:
                 class NewSegment:
-                    def __init__(self, text, start, end):
+                    def __init__(self, text, start, end, words=None):
                         self.text = text
                         self.start = start
                         self.end = end
+                        self.words = words if words else []
+
+                    def has_words(self):
+                        return bool(self.words)
 
                 segment_start = line_words[0].start
                 segment_end = line_words[-1].end
-                new_segments.append(NewSegment(line_text, segment_start, segment_end))
+                new_segments.append(NewSegment(line_text, segment_start, segment_end, line_words))
 
         # 결과 객체의 segments를 교체
         if new_segments:
