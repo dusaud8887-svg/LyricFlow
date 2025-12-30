@@ -1,6 +1,18 @@
 """
-호시마치 스이세이 가사 싱크 스크립트 (v1.2 Enhanced)
+호시마치 스이세이 가사 싱크 스크립트 (v2.1 Line-Preserve)
 MP3 + 일본어 가사 → LRC 자막 생성
+
+v2.1 신규 기능:
+    - ⭐ 줄바꿈 보존 모드 (사용자 소절 유지)
+    - 소절 기반 품질 검증
+
+v2.0 기능 (유지):
+    - Demucs 보컬 분리 (선택적)
+    - VAD (Voice Activity Detection)
+    - 세그먼트 최적화 (4단계 체인)
+    - 품질 검증 및 경고
+    - 프로파일 시스템 (ballad/normal/fast)
+    - initial_prompt 최적화
 
 사용법:
     python sync_suisei.py
@@ -10,11 +22,13 @@ MP3 + 일본어 가사 → LRC 자막 생성
     - stable-ts
     - PyTorch (CUDA)
     - RTX 3070 Ti (또는 동급 GPU)
+    - (선택) demucs (보컬 분리용)
 """
 
 import sys
 from pathlib import Path
 import time
+import re
 from typing import Optional
 
 # 라이브러리 import 에러 처리
@@ -64,14 +78,222 @@ SAVE_SUMMARY_LOG = True
 SUMMARY_LOG_FILE = 'summary.txt'
 
 # ============================================================
+# v2.0 고급 설정
+# ============================================================
+
+# ⭐ v2.1: 줄바꿈 보존 모드 (핵심 개선!)
+# True: 가사 파일의 줄바꿈을 그대로 유지 → 소절별 타임스탬프 (권장!)
+# False: 자동으로 세그먼트 분할 (글자 수 기반)
+PRESERVE_LINES = True
+
+# Demucs 보컬 분리 (최고 품질, 처리 시간 3배 증가)
+# False: 비활성화 (기본, 빠름)
+# True: 활성화 (보컬만 추출, WER 60% 감소)
+USE_DEMUCS = False
+
+# VAD (Voice Activity Detection) 사용
+# True: 음성 구간만 처리 (환각 방지, 정확도 향상)
+USE_VAD = True
+VAD_THRESHOLD = 0.35  # 노래 권장값: 0.3~0.4
+
+# 세그먼트 최적화 프로파일
+# 'ballad': 발라드 (느린 템포, 긴 호흡)
+# 'normal': 일반 곡 (표준 설정, 권장)
+# 'fast': 빠른 곡 (랩, 업템포)
+SEGMENT_PROFILE = 'normal'
+
+# initial_prompt (일본어 인식 정확도 향상)
+# 아티스트명, 곡명 등을 포함하면 고유명사 인식 개선
+INITIAL_PROMPT = "以下は日本語の歌詞です。ホシマチスイセイの楽曲。"
+
+# 품질 검증 옵션
+ENABLE_QUALITY_VALIDATION = True  # 품질 경고 표시
+WARN_LONG_SEGMENTS = 5.0  # 5초 이상 세그먼트 경고
+WARN_AVG_CHARS = 35  # 평균 35자 이상 경고
+
+# ============================================================
 # 함수 정의
 # ============================================================
+
+def clean_lyrics(text: str, preserve_lines: bool = True) -> str:
+    """
+    가사 텍스트 전처리 및 정규화 (v2.1)
+
+    처리 내용:
+    - 전각 공백 → 반각 공백
+    - 특수문자 제거 (괄호, 음악 기호 등)
+    - 여러 공백 → 하나로 (줄바꿈 보존!)
+    - 빈 라인 제거
+
+    Args:
+        text: 원본 가사 텍스트
+        preserve_lines: True이면 사용자 줄바꿈 보존 (기본: True)
+                       False이면 모든 공백 정규화 (자동 분할)
+
+    Returns:
+        정제된 가사 텍스트
+    """
+    # [1] 전각 공백을 반각 공백으로
+    text = text.replace('\u3000', ' ')
+
+    # [2] 특수문자 제거 (싱크 방해 요소)
+    # 괄호류: （）()「」『』【】《》〈〉［］[]｛｝{}
+    # 음악 기호: ♪♬♩♫～〜
+    text = re.sub(r'[（）()「」『』【】《》〈〉［］\[\]｛｝\{\}]', '', text)
+    text = re.sub(r'[♪♬♩♫～〜]', '', text)
+
+    # [3] 줄바꿈 보존 처리 (v2.1 핵심 개선!)
+    if preserve_lines:
+        # 각 라인별로 처리 → 줄바꿈 보존!
+        lines = []
+        for line in text.split('\n'):
+            # 각 라인 내부의 공백(스페이스, 탭)만 정규화
+            line = re.sub(r'[ \t]+', ' ', line)
+            line = line.strip()
+            if line:
+                lines.append(line)
+        return '\n'.join(lines)
+    else:
+        # 기존 방식: 모든 공백을 정규화 (줄바꿈 포함)
+        text = re.sub(r'\s+', ' ', text)
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        return '\n'.join(lines)
+
+
+def optimize_segments(result, profile: str = 'normal', preserve_lines: bool = False):
+    """
+    세그먼트 4단계 최적화 체인 (v2.1)
+
+    Args:
+        result: stable-ts 결과 객체
+        profile: 'ballad', 'normal', 'fast'
+        preserve_lines: True이면 최소 최적화만 (줄바꿈 보존 모드)
+
+    Returns:
+        최적화된 result 객체 (in-place 수정)
+    """
+    # 프로파일 설정
+    PROFILES = {
+        'ballad': {
+            'punctuation': [('。', ' '), ('、', ' '), ('？', ' '), ('！', ' '), ('…', ' ')],
+            'gap_threshold': 2.5,
+            'max_chars': 35,
+            'merge_gap': 0.20,
+        },
+        'normal': {
+            'punctuation': [('。', ' '), ('、', ' '), ('？', ' '), ('！', ' ')],
+            'gap_threshold': 2.0,
+            'max_chars': 30,
+            'merge_gap': 0.15,
+        },
+        'fast': {
+            'punctuation': [('。', ' '), ('、', ' ')],
+            'gap_threshold': 1.5,
+            'max_chars': 25,
+            'merge_gap': 0.10,
+        },
+    }
+
+    cfg = PROFILES.get(profile, PROFILES['normal'])
+
+    # === 타임스탬프 보정 (항상 수행) ===
+    result.clamp_max()
+
+    # === v2.1: 줄바꿈 보존 모드 처리 ===
+    if preserve_lines:
+        # 줄바꿈 보존 모드: 최소 최적화만 수행
+        # - 타임스탬프 보정만 수행 (위에서 완료)
+        # - 세그먼트 분할/병합 스킵 (사용자 줄바꿈 보존!)
+        return result
+
+    # === 4단계 최적화 체인 (자동 분할 모드) ===
+
+    # 1단계: 구두점으로 분할 (최우선)
+    result.split_by_punctuation(cfg['punctuation'])
+
+    # 2단계: 침묵 구간으로 분할
+    result.split_by_gap(gap_threshold=cfg['gap_threshold'])
+
+    # 3단계: 길이 제한
+    result.split_by_length(
+        max_chars=cfg['max_chars'],
+        max_words=None,  # 일본어는 공백 없으므로 None
+        even_split=True  # 균등 분할
+    )
+
+    # 4단계: 짧은 세그먼트 병합
+    result.merge_by_gap(
+        max_gap=cfg['merge_gap'],
+        max_chars=cfg['max_chars']
+    )
+
+    return result
+
+
+def validate_result(result, song_name: str) -> dict:
+    """
+    생성된 결과 품질 검증 (v2.1)
+
+    Args:
+        result: stable-ts 결과 객체
+        song_name: 곡 이름
+
+    Returns:
+        dict: 품질 통계 및 경고
+    """
+    segments = result.segments
+
+    if not segments:
+        return {
+            'total_segments': 0,
+            'warnings': ['세그먼트가 비어 있음']
+        }
+
+    # 통계 계산
+    durations = [seg.end - seg.start for seg in segments]
+    char_counts = [len(seg.text) for seg in segments]
+
+    stats = {
+        'total_segments': len(segments),
+        'avg_duration': sum(durations) / len(durations) if durations else 0,
+        'avg_chars': sum(char_counts) / len(char_counts) if char_counts else 0,
+        'min_duration': min(durations) if durations else 0,
+        'max_duration': max(durations) if durations else 0,
+        'long_segments': sum(1 for d in durations if d > WARN_LONG_SEGMENTS),
+        'short_segments': sum(1 for d in durations if d < 0.5),
+        'warnings': []
+    }
+
+    # === v2.1: 줄바꿈 보존 모드별 검증 ===
+    if ENABLE_QUALITY_VALIDATION:
+        if PRESERVE_LINES:
+            # 줄바꿈 보존 모드: 소절 기반 검증
+            if stats['long_segments'] > 0:
+                stats['warnings'].append(f"긴 소절 {stats['long_segments']}개 ({WARN_LONG_SEGMENTS}초 이상) - 가사 파일 확인 권장")
+
+            # 매우 짧은 세그먼트만 경고 (소절이 원래 짧을 수 있음)
+            very_short = sum(1 for d in durations if d < 0.3)
+            if very_short > 2:
+                stats['warnings'].append(f"매우 짧은 소절 {very_short}개 (0.3초 미만) - 가사 파일 확인 권장")
+        else:
+            # 자동 분할 모드: 기존 검증
+            if stats['long_segments'] > 0:
+                stats['warnings'].append(f"긴 세그먼트 {stats['long_segments']}개 발견 ({WARN_LONG_SEGMENTS}초 이상)")
+
+            if stats['short_segments'] > 3:
+                stats['warnings'].append(f"짧은 세그먼트 {stats['short_segments']}개 발견 (0.5초 미만)")
+
+            if stats['avg_chars'] > WARN_AVG_CHARS:
+                stats['warnings'].append(f"평균 글자수 {stats['avg_chars']:.1f}자 (권장: {WARN_AVG_CHARS}자 이하)")
+
+    return stats
+
 
 def verify_environment() -> bool:
     """환경 검증: GPU, CUDA, 폴더 존재 확인"""
 
     print("=" * 60)
-    print("🎵 호시마치 스이세이 가사 싱크 시작 (v1.2)")
+    print("🎵 호시마치 스이세이 가사 싱크 시작 (v2.1 Line-Preserve)")
     print("=" * 60)
     print()
 
@@ -100,7 +322,12 @@ def verify_environment() -> bool:
     # [4] 설정 출력
     print(f"📊 설정:")
     print(f"   모델: {MODEL_NAME}")
+    print(f"   ⭐ 줄바꿈 보존: {'활성화 (소절 유지)' if PRESERVE_LINES else '비활성화 (자동 분할)'}")
     print(f"   Enhanced LRC: {'활성화 (단어별)' if WORD_LEVEL_LRC else '비활성화 (라인별)'}")
+    print(f"   Demucs 보컬 분리: {'활성화' if USE_DEMUCS else '비활성화'}")
+    print(f"   VAD: {'활성화' if USE_VAD else '비활성화'} (임계값: {VAD_THRESHOLD})")
+    print(f"   세그먼트 프로파일: {SEGMENT_PROFILE}")
+    print(f"   품질 검증: {'활성화' if ENABLE_QUALITY_VALIDATION else '비활성화'}")
     print(f"   로그 저장: {'활성화' if SAVE_SUMMARY_LOG else '비활성화'}")
     print()
 
@@ -180,19 +407,28 @@ def verify_files(songs_dir: str, lyrics_dir: str) -> list[dict]:
 
 
 def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) -> dict:
-    """단일 곡 처리: 가사 정렬 + LRC 저장"""
+    """
+    단일 곡 처리: 가사 정렬 + 세그먼트 최적화 + LRC 저장 (v2.1)
+
+    v2.1 개선사항:
+    - ⭐ 줄바꿈 보존 모드 (사용자 소절 유지)
+    - 가사 텍스트 전처리
+    - VAD 및 고급 align() 옵션
+    - Demucs 보컬 분리 (선택적)
+    - 세그먼트 4단계 최적화
+    - 품질 검증 및 경고
+    """
 
     try:
-        # [1] 가사 읽기 (UTF-8-sig로 BOM 처리)
+        # [1] 가사 읽기 및 전처리
         try:
             with open(lyrics_path, 'r', encoding='utf-8-sig') as f:
                 lyrics = f.read().strip()
         except UnicodeDecodeError:
-            # UTF-8-sig 실패 시 UTF-8 시도
             with open(lyrics_path, 'r', encoding='utf-8') as f:
                 lyrics = f.read().strip()
 
-        # BOM 제거 (혹시 남아있을 경우)
+        # BOM 제거
         lyrics = lyrics.lstrip('\ufeff')
 
         # 빈 가사 확인
@@ -200,35 +436,96 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
             print(f"❌ 오류: 가사 파일이 비어 있습니다.")
             return {'success': False, 'error': '빈 가사 파일'}
 
-        # 빈 라인 제거 (불필요한 빈 라인 정리)
-        lyrics_lines = [line for line in lyrics.split('\n') if line.strip()]
-        lyrics = '\n'.join(lyrics_lines)
+        # === v2.1: 가사 전처리 (줄바꿈 보존!) ===
+        lyrics = clean_lyrics(lyrics, preserve_lines=PRESERVE_LINES)
 
         # 가사 라인 수 계산
+        lyrics_lines = [line for line in lyrics.split('\n') if line.strip()]
         lines = len(lyrics_lines)
-        print(f"📝 가사 라인: {lines}개")
+        preserve_status = "소절 보존" if PRESERVE_LINES else "자동 분할"
+        print(f"📝 가사 라인: {lines}개 ({preserve_status}, 전처리 완료)")
 
-        # [2] 모델 정렬 (Forced Alignment)
-        print(f"⏳ 정렬 중... (GPU)")
+        # [2] 모델 정렬 (Forced Alignment) - v2.0 개선
+        demucs_status = "Demucs 활성화" if USE_DEMUCS else "기본"
+        print(f"⏳ 정렬 중... ({demucs_status}, GPU)")
         start = time.time()
 
-        result = model.align(
-            str(mp3_path),
-            lyrics,
-            language=LANGUAGE  # 'ja' (일본어)
-        )
+        # align() 옵션 준비
+        align_options = {
+            'language': LANGUAGE,
+        }
+
+        # initial_prompt 추가
+        if INITIAL_PROMPT:
+            align_options['initial_prompt'] = INITIAL_PROMPT
+
+        # === v2.0: VAD 및 고급 옵션 (try-except로 안전하게) ===
+        try:
+            # Demucs 옵션
+            if USE_DEMUCS:
+                align_options['denoiser'] = 'demucs'
+                align_options['denoiser_options'] = {'device': 'cuda'}
+
+            # VAD 옵션
+            if USE_VAD:
+                align_options['vad'] = True
+                align_options['vad_threshold'] = VAD_THRESHOLD
+                align_options['suppress_silence'] = True
+
+            # 환각 방지 옵션
+            align_options['temperature'] = 0  # 결정론적
+            align_options['condition_on_previous_text'] = False
+
+            # regroup은 수동으로 할 것이므로 비활성화
+            align_options['regroup'] = False
+
+            result = model.align(str(mp3_path), lyrics, **align_options)
+
+        except TypeError as e:
+            # 일부 파라미터가 align()에서 미지원될 경우 기본으로 fallback
+            print(f"   ⚠️ 일부 고급 옵션 미지원, 기본 모드로 실행")
+            result = model.align(
+                str(mp3_path),
+                lyrics,
+                language=LANGUAGE,
+                initial_prompt=INITIAL_PROMPT if INITIAL_PROMPT else None
+            )
 
         elapsed = time.time() - start
+        print(f"   ✓ 정렬 완료 ({elapsed:.1f}초)")
 
-        # [3] LRC 저장
+        # [3] 세그먼트 최적화 (v2.1: 줄바꿈 보존 고려!)
+        if PRESERVE_LINES:
+            # 줄바꿈 보존 모드: 최소 최적화만
+            print(f"✂️ 타임스탬프 보정 중... (소절 보존 모드)")
+            optimize_segments(result, profile=SEGMENT_PROFILE, preserve_lines=True)
+            print(f"   ✓ 보정 완료 ({len(result.segments)}개 세그먼트 - 소절 유지)")
+        else:
+            # 자동 분할 모드: 4단계 최적화 체인
+            print(f"✂️ 세그먼트 최적화 중... (프로파일: {SEGMENT_PROFILE})")
+            optimize_segments(result, profile=SEGMENT_PROFILE, preserve_lines=False)
+            print(f"   ✓ 최적화 완료 ({len(result.segments)}개 세그먼트)")
+
+        # [4] 품질 검증
+        validation = validate_result(result, mp3_path.stem)
+
+        # 경고 출력
+        if validation['warnings']:
+            for warning in validation['warnings']:
+                print(f"   ⚠️ {warning}")
+
+        # [5] LRC 저장
         result.to_srt_vtt(str(output_path), word_level=WORD_LEVEL_LRC)
 
-        # [4] 결과 출력
+        # [6] 결과 출력
         file_size = output_path.stat().st_size / 1024  # KB
         lrc_type = "Enhanced (단어별)" if WORD_LEVEL_LRC else "일반 (라인별)"
         print(f"✅ 완료: {output_path}")
         print(f"   타입: {lrc_type}")
         print(f"   소요시간: {elapsed:.1f}초")
+        print(f"   세그먼트: {validation['total_segments']}개")
+        print(f"   평균 길이: {validation['avg_duration']:.1f}초")
+        print(f"   평균 글자수: {validation['avg_chars']:.1f}자")
         print(f"   크기: {file_size:.1f} KB")
         print()
 
@@ -237,7 +534,11 @@ def process_song(model, mp3_path: Path, lyrics_path: Path, output_path: Path) ->
             'time': elapsed,
             'lines': lines,
             'size': file_size,
-            'lrc_type': lrc_type
+            'lrc_type': lrc_type,
+            'segments': validation['total_segments'],
+            'avg_duration': validation['avg_duration'],
+            'avg_chars': validation['avg_chars'],
+            'warnings': validation['warnings']
         }
 
     except UnicodeDecodeError as e:
@@ -282,7 +583,11 @@ def print_summary(results: list[dict], total_time: float, save_to_file: bool = F
     summary_lines.append(f"성공: {success_count}곡")
     summary_lines.append(f"실패: {fail_count}곡")
     summary_lines.append(f"모델: {MODEL_NAME}")
+    summary_lines.append(f"⭐ 줄바꿈 보존: {'활성화 (소절 유지)' if PRESERVE_LINES else '비활성화 (자동 분할)'}")
     summary_lines.append(f"LRC 타입: {'Enhanced (단어별)' if WORD_LEVEL_LRC else '일반 (라인별)'}")
+    summary_lines.append(f"Demucs: {'활성화' if USE_DEMUCS else '비활성화'}")
+    summary_lines.append(f"VAD: {'활성화' if USE_VAD else '비활성화'}")
+    summary_lines.append(f"세그먼트 프로파일: {SEGMENT_PROFILE}")
 
     # 실패한 곡 목록
     if fail_count > 0:
@@ -305,7 +610,7 @@ def print_summary(results: list[dict], total_time: float, save_to_file: bool = F
             avg_time = sum(successful_times) / len(successful_times)
             summary_lines.append(f"평균 처리 시간: {avg_time:.1f}초/곡")
 
-    # 성공한 곡 상세 (옵션)
+    # 성공한 곡 상세 (v2.0 개선)
     if success_count > 0:
         summary_lines.append("")
         summary_lines.append("성공한 곡:")
@@ -314,7 +619,17 @@ def print_summary(results: list[dict], total_time: float, save_to_file: bool = F
                 song_name = r.get('name', '알 수 없음')
                 elapsed = r.get('time', 0)
                 lines_count = r.get('lines', 0)
-                summary_lines.append(f"  ✓ {song_name}: {lines_count}줄, {elapsed:.1f}초")
+                segments = r.get('segments', 0)
+                avg_chars = r.get('avg_chars', 0)
+
+                # v2.0 정보 포함
+                detail = f"  ✓ {song_name}: {elapsed:.1f}초"
+                if segments > 0:
+                    detail += f", {segments}개 세그먼트"
+                if avg_chars > 0:
+                    detail += f", 평균 {avg_chars:.0f}자"
+
+                summary_lines.append(detail)
 
     summary_lines.append("=" * 60)
 

@@ -1,4 +1,65 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+songs/
+lyrics/
+output/
+*.lrc
+*.srt
 summary.txt
+*.log
+
+# Whisper model cache
+~/.cache/whisper/
+
+# GPU
+.nvidia/
+
+# uv
+.python-version
+uv.lock
+
+# Test files
+test_*.py
+*_test.py
