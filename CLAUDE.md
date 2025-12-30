@@ -53,6 +53,7 @@
 | 영역 | 기술 | 버전/사양 |
 |------|------|----------|
 | Language | Python | 3.10+ |
+| Package Manager | uv (권장) / pip | 최신 |
 | Core Library | stable-whisper | 최신 |
 | ML Framework | PyTorch | CUDA 지원 |
 | Model | Whisper large-v3 | 2.9GB |
@@ -92,7 +93,10 @@ suisei_lyrics/
 ## Commands
 
 ```bash
-# 환경 설정
+# 환경 설정 (uv 권장 - 빠르고 안정적)
+uv pip install stable-ts torch
+
+# 또는 기존 pip 사용
 pip install stable-ts torch
 
 # GPU 확인
@@ -222,7 +226,11 @@ sed -i '1s/^\xEF\xBB\xBF//' lyrics/*.txt
 
 ### CUDA 관련
 ```bash
-# CUDA 미인식
+# CUDA 미인식 (uv 사용 시)
+uv pip uninstall torch
+uv pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# CUDA 미인식 (pip 사용 시)
 pip uninstall torch
 pip install torch --index-url https://download.pytorch.org/whl/cu121
 
@@ -314,8 +322,17 @@ lyrics = '\n'.join(line for line in lyrics.split('\n') if line.strip())
 
 1. **환경 확인** (2분)
    ```bash
+   # uv 설치 (권장 - 빠르고 안정적)
+   pip install uv
+
+   # 의존성 설치 (uv 사용)
+   uv pip install stable-ts torch
+
+   # 또는 기존 pip 사용
+   pip install stable-ts torch
+
+   # GPU 확인
    python -c "import torch; print(torch.cuda.get_device_name(0))"
-   pip install stable-ts
    ```
 
 2. **폴더 생성** (1분)
